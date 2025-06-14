@@ -109,7 +109,7 @@ def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
             client.close()
 
 # Title and description
-st.title("Advanced DNS Anomaly Detection Dashboard")
+st.title("DNS Anomaly Detection Dashboard")
 st.markdown("""
 Monitor DNS traffic in real-time using InfluxDB data, detecting anomalies with a pre-trained autoencoder model.
 Analyze live and historical data, capture attacks, and evaluate model performance with Grafana-style visualizations.
