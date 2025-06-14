@@ -10,6 +10,8 @@ import sqlite3
 from influxdb_client import InfluxDBClient
 import time
 from requests.exceptions import ReadTimeout
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+import plotly.figure_factory as ff
 
 # Streamlit page configuration
 st.set_page_config(page_title="DNS Anomaly Detection Dashboard", layout="wide")
@@ -44,12 +46,12 @@ init_db()
 
 # Query InfluxDB for DNS data with retry
 def get_dns_data(range_start="-30m", retries=3, delay=5):
-    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)  # 30 seconds
+    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {range_start})
       |> filter(fn: (r) => r._measurement == "dns")
-      |> filter(fn: (r) => r._field == "inter_arrival_time" or r._field == "dns_rate")
+      |> filter(fn: (r) => r._field == "inter_arrival_time" or r._field == "dns_rate" or r._field == "label")
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
       |> sort(columns: ["_time"], desc: true)
       |> limit(n: 1)
@@ -62,7 +64,8 @@ def get_dns_data(range_start="-30m", retries=3, delay=5):
                     return {
                         "timestamp": record.get_time().strftime("%Y-%m-%d %H:%M:%S"),
                         "inter_arrival_time": record.values.get("inter_arrival_time", None),
-                        "dns_rate": record.values.get("dns_rate", None)
+                        "dns_rate": record.values.get("dns_rate", None),
+                        "label": record.values.get("label", None)
                     }
             return None
         except (ReadTimeout, Exception) as e:
@@ -82,9 +85,10 @@ def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: {start_time}, stop: {end_time})
       |> filter(fn: (r) => r._measurement == "dns")
-      |> filter(fn: (r) => r._field == "inter_arrival_time" or r._field == "dns_rate")
+      |> filter(fn: (r) => r._field == "inter_arrival_time" or r._field == "dns_rate" or r._field == "label")
       |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
       |> sort(columns: ["_time"], desc: false)
+      |> limit(n: 1000)
     '''
     for attempt in range(retries):
         try:
@@ -95,16 +99,17 @@ def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
                     data.append({
                         "timestamp": record.get_time().strftime("%Y-%m-%d %H:%M:%S"),
                         "inter_arrival_time": record.values.get("inter_arrival_time", None),
-                        "dns_rate": record.values.get("dns_rate", None)
+                        "dns_rate": record.values.get("dns_rate", None),
+                        "label": record.values.get("label", None)
                     })
-            return pd.DataFrame(data) if data else pd.DataFrame(columns=["timestamp", "inter_arrival_time", "dns_rate"])
+            return pd.DataFrame(data) if data else pd.DataFrame(columns=["timestamp", "inter_arrival_time", "dns_rate", "label"])
         except (ReadTimeout, Exception) as e:
             if attempt < retries - 1:
                 st.warning(f"Historical InfluxDB query attempt {attempt + 1} failed: {e}. Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 st.error(f"Historical InfluxDB query failed after {retries} attempts: {e}")
-                return pd.DataFrame(columns=["timestamp", "inter_arrival_time", "dns_rate"])
+                return pd.DataFrame(columns=["timestamp", "inter_arrival_time", "dns_rate", "label"])
         finally:
             client.close()
 
@@ -158,6 +163,7 @@ if st.button("Detect Anomaly"):
         response.raise_for_status()
         result = response.json()
         result["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result["label"] = None  # Manual input has no ground truth
         st.session_state.predictions.append(result)
         st.session_state.predictions = st.session_state.predictions[-1000:]
         if result["anomaly"] == 1:
@@ -191,6 +197,7 @@ if st.checkbox("Enable Live Stream", value=True):
             response.raise_for_status()
             result = response.json()
             result["timestamp"] = data["timestamp"]
+            result["label"] = data["label"]
             st.session_state.predictions.append(result)
             st.session_state.predictions = st.session_state.predictions[-1000:]
             if result["anomaly"] == 1:
@@ -226,6 +233,7 @@ if not historical_df.empty:
                 response.raise_for_status()
                 result = response.json()
                 result["timestamp"] = row["timestamp"]
+                result["label"] = row["label"]
                 historical_predictions.append(result)
                 if result["anomaly"] == 1:
                     st.session_state.attacks.append(result)
@@ -248,9 +256,41 @@ if st.session_state.predictions:
     df = pd.DataFrame(st.session_state.predictions)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     
+    # Performance metrics
+    st.subheader("Model Performance Metrics")
+    valid_df = df.dropna(subset=["label", "anomaly"])
+    if not valid_df.empty:
+        y_true = valid_df["label"].astype(int)
+        y_pred = valid_df["anomaly"].astype(int)
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Accuracy", f"{accuracy:.2%}")
+        col2.metric("Precision", f"{precision:.2%}")
+        col3.metric("Recall", f"{recall:.2%}")
+        col4.metric("F1-Score", f"{f1:.2%}")
+        
+        # Confusion matrix
+        cm = confusion_matrix(y_true, y_pred)
+        cm_df = pd.DataFrame(cm, index=["Normal", "Attack"], columns=["Predicted Normal", "Predicted Attack"])
+        fig_cm = ff.create_annotated_heatmap(
+            z=cm,
+            x=["Predicted Normal", "Predicted Attack"],
+            y=["Normal", "Attack"],
+            annotation_text=cm.astype(str),
+            colorscale="Blues"
+        )
+        fig_cm.update_layout(title="Confusion Matrix", width=400, height=400)
+        st.plotly_chart(fig_cm)
+    else:
+        st.warning("No ground truth labels available for performance metrics.")
+    
     # Table
     st.subheader("Recent Predictions")
-    st.dataframe(df[["timestamp", "inter_arrival_time", "dns_rate", "request_rate", "reconstruction_error", "anomaly"]])
+    st.dataframe(df[["timestamp", "inter_arrival_time", "dns_rate", "request_rate", "reconstruction_error", "anomaly", "label"]])
     
     # Time-series plot
     st.subheader("Time-Series Analysis")
