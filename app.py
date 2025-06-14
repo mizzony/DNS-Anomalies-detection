@@ -16,7 +16,8 @@ if "predictions" not in st.session_state:
     st.session_state.predictions = []
 
 # API endpoint (update with Hugging Face URL if deployed)
-API_URL = "http://localhost:8000/predict"
+#API_URL = "http://localhost:8000/predict"
+API_URL = "https://mizzony-dns-anomalies-detection.hf.space/predict"
 
 # Title and description
 st.title("Real-Time DNS Anomaly Detection Dashboard")
