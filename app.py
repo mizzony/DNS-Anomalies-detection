@@ -112,12 +112,16 @@ def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
 st.title("Advanced DNS Anomaly Detection Dashboard")
 st.markdown("""
 Monitor DNS traffic in real-time using InfluxDB data, detecting anomalies with a pre-trained autoencoder model.
-Analyze live and real time data, capture attacks, and evaluate model performance with Grafana-style visualizations.
+Analyze live and historical data, capture attacks, and evaluate model performance with Grafana-style visualizations.
 """)
 
 # Sidebar for controls
 st.sidebar.header("Dashboard Controls")
-time_range = st.sidebar.selectbox("Time Range", ["Last 30 min", "Last 1 hour", "Last 24 hours", "Last 7 days"])
+time_range = st.sidebar.selectbox(
+    "Time Range",
+    ["Last 30 min", "Last 1 hour", "Last 24 hours", "Last 7 days", "Last 14 days", "Last 30 days"],
+    index=4  # Default to "Last 14 days"
+)
 threshold = st.sidebar.slider("Anomaly Threshold", 0.01, 1.0, 0.1, 0.01)
 enable_alerts = st.sidebar.checkbox("Enable Attack Alerts", value=True)
 
@@ -126,7 +130,9 @@ time_ranges = {
     "Last 30 min": ("-30m", "now()"),
     "Last 1 hour": ("-1h", "now()"),
     "Last 24 hours": ("-24h", "now()"),
-    "Last 7 days": ("-7d", "now()")
+    "Last 7 days": ("-7d", "now()"),
+    "Last 14 days": ("-14d", "now()"),
+    "Last 30 days": ("-30d", "now()")
 }
 start_time, end_time = time_ranges[time_range]
 
@@ -203,7 +209,7 @@ if st.checkbox("Enable Live Stream", value=True):
         st.error(f"Error in live stream: {e}")
 
 # Load historical data
-st.header("Attack Analysis")
+st.header("Historical Data Analysis")
 historical_df = get_historical_dns_data(start_time, end_time)
 
 # Process historical data through API
