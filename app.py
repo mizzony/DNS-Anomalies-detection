@@ -209,7 +209,7 @@ if st.checkbox("Enable Live Stream", value=True):
         st.error(f"Error in live stream: {e}")
 
 # Load historical data
-st.header("Historical Data Analysis")
+st.header("Attack Analysis")
 historical_df = get_historical_dns_data(start_time, end_time)
 
 # Process historical data through API
