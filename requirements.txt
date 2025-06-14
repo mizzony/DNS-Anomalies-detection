@@ -5,3 +5,4 @@ requests>=2.31.0
 plotly>=5.18.0
 streamlit-autorefresh>=0.0.1
 influxdb-client>=1.36.0
+scikit-learn>=1.2.0
