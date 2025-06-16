@@ -47,8 +47,7 @@ def init_db():
 
 init_db()
 
-# Query InfluxDB for DNS data with retry
-@st.cache_data(ttl=1800)  # Cache for 30 minutes
+# Query InfluxDB for DNS data with retry (no caching for real-time)
 def get_dns_data(range_start="-30m", retries=3, delay=5):
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)
     query = f'''
@@ -83,7 +82,7 @@ def get_dns_data(range_start="-30m", retries=3, delay=5):
         finally:
             client.close()
 
-# Query InfluxDB for historical data with retry
+# Query InfluxDB for historical data with retry and caching
 @st.cache_data(ttl=1800)
 def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)
