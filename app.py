@@ -47,9 +47,9 @@ def init_db():
 
 init_db()
 
-# Query InfluxDB for DNS data with retry and caching
+# Query InfluxDB for DNS data with retry
 @st.cache_data(ttl=1800)  # Cache for 30 minutes
-def get_dns_data(range_start="-30m", retries=3, delay=5, _cache_key=None):
+def get_dns_data(range_start="-30m", retries=3, delay=5):
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
@@ -83,9 +83,9 @@ def get_dns_data(range_start="-30m", retries=3, delay=5, _cache_key=None):
         finally:
             client.close()
 
-# Query InfluxDB for historical data with retry and caching
+# Query InfluxDB for historical data with retry
 @st.cache_data(ttl=1800)
-def get_historical_dns_data(start_time, end_time, retries=3, delay=5, _cache_key=None):
+def get_historical_dns_data(start_time, end_time, retries=3, delay=5):
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=30000)
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
@@ -154,37 +154,40 @@ start_time, end_time = time_ranges[time_range]
 st_autorefresh(interval=1800000, key="datarefresh")
 
 # Data loading (executed before tabs)
-historical_df = get_historical_dns_data(start_time, end_time)
-if not historical_df.empty:
-    historical_predictions = []
-    for _, row in historical_df.iterrows():
-        if pd.notnull(row["inter_arrival_time"]) and pd.notnull(row["dns_rate"]):
-            payload = {
-                "inter_arrival_time": float(row["inter_arrival_time"]),
-                "dns_rate": float(row["dns_rate"])
-            }
-            try:
-                response = requests.post(API_URL, json=payload)
-                response.raise_for_status()
-                result = response.json()
-                result["timestamp"] = row["timestamp"]
-                result["label"] = row["label"]
-                historical_predictions.append(result)
-                if result["anomaly"] == 1:
-                    st.session_state.attacks.append(result)
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute('''INSERT INTO attacks (timestamp, inter_arrival_time, dns_rate, request_rate,
-                                reconstruction_error, anomaly) VALUES (?, ?, ?, ?, ?, ?)''',
-                              (result["timestamp"], result["inter_arrival_time"], result["dns_rate"],
-                               result["request_rate"], result["reconstruction_error"], result["anomaly"]))
-                    conn.commit()
-                    conn.close()
-            except requests.exceptions.RequestException as e:
-                st.warning(f"API request failed: {e}")
-    if historical_predictions:
-        st.session_state.predictions.extend(historical_predictions)
-        st.session_state.predictions = st.session_state.predictions[-1000:]
+try:
+    historical_df = get_historical_dns_data(start_time, end_time)
+    if not historical_df.empty:
+        historical_predictions = []
+        for _, row in historical_df.iterrows():
+            if pd.notnull(row["inter_arrival_time"]) and pd.notnull(row["dns_rate"]):
+                payload = {
+                    "inter_arrival_time": float(row["inter_arrival_time"]),
+                    "dns_rate": float(row["dns_rate"])
+                }
+                try:
+                    response = requests.post(API_URL, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
+                    result["timestamp"] = row["timestamp"]
+                    result["label"] = row["label"]
+                    historical_predictions.append(result)
+                    if result["anomaly"] == 1:
+                        st.session_state.attacks.append(result)
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute('''INSERT INTO attacks (timestamp, inter_arrival_time, dns_rate, request_rate,
+                                    reconstruction_error, anomaly) VALUES (?, ?, ?, ?, ?, ?)''',
+                                  (result["timestamp"], result["inter_arrival_time"], result["dns_rate"],
+                                   result["request_rate"], result["reconstruction_error"], result["anomaly"]))
+                        conn.commit()
+                        conn.close()
+                except requests.exceptions.RequestException as e:
+                    st.warning(f"API request failed: {e}")
+        if historical_predictions:
+            st.session_state.predictions.extend(historical_predictions)
+            st.session_state.predictions = st.session_state.predictions[-1000:]
+except Exception as e:
+    st.error(f"Failed to load historical data: {e}")
 
 if st.session_state.predictions:
     df = pd.DataFrame(st.session_state.predictions)
@@ -245,7 +248,7 @@ with tab1:
     st.subheader("Real-Time Monitoring")
     if st.checkbox("Enable Live Stream", value=True):
         try:
-            data = get_dns_data(cache_key=f"live_{time.time()}")
+            data = get_dns_data(range_start="-30m")
             if data and data["inter_arrival_time"] is not None and data["dns_rate"] is not None:
                 payload = {
                     "inter_arrival_time": data["inter_arrival_time"],
@@ -270,7 +273,7 @@ with tab1:
                     conn.close()
                     if enable_alerts:
                         st.error(f"Attack Detected! Timestamp: {result['timestamp']}, Error: {result['reconstruction_error']:.6f}")
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             st.error(f"Error in live stream: {e}")
     
     # Summary metrics
