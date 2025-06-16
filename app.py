@@ -17,10 +17,13 @@ import plotly.figure_factory as ff
 st.set_page_config(page_title="DNS Anomaly Detection Dashboard", layout="wide")
 
 # Initialize session state
-if "predictions" not in st.session_state:
-    st.session_state.predictions = []
-if "attacks" not in st.session_state:
-    st.session_state.attacks = []
+def init_session_state():
+    if "predictions" not in st.session_state:
+        st.session_state.predictions = []
+    if "attacks" not in st.session_state:
+        st.session_state.attacks = []
+
+init_session_state()
 
 # API endpoint
 API_URL = "https://mizzony-dns-anomalies-detection.hf.space/predict"
@@ -144,6 +147,13 @@ start_time, end_time = time_ranges[time_range]
 # Auto-refresh every 30 minutes (1800000 ms)
 st_autorefresh(interval=1800000, key="datarefresh")
 
+# Data loading (executed before tabs)
+if st.session_state.predictions:
+    df = pd.DataFrame(st.session_state.predictions)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+else:
+    df = pd.DataFrame(columns=["timestamp", "inter_arrival_time", "dns_rate", "request_rate", "reconstruction_error", "anomaly", "label"])
+
 # Tabs
 tab1, tab2, tab3 = st.tabs(["Summary & Predictions", "Visualizations", "Model Performance"])
 
@@ -223,9 +233,7 @@ with tab1:
     
     # Summary metrics
     st.subheader("Summary")
-    if st.session_state.predictions:
-        df = pd.DataFrame(st.session_state.predictions)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
+    if not df.empty:
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Predictions", len(df))
         col2.metric("Attack Rate", f"{df['anomaly'].mean():.2%}")
@@ -233,7 +241,7 @@ with tab1:
     
     # Recent predictions
     st.subheader("Recent Predictions")
-    if st.session_state.predictions:
+    if not df.empty:
         st.dataframe(df[["timestamp", "inter_arrival_time", "dns_rate", "request_rate", "reconstruction_error", "anomaly", "label"]])
 
 with tab2:
@@ -276,10 +284,7 @@ with tab2:
             st.session_state.predictions = st.session_state.predictions[-1000:]
     
     # Visualizations
-    if st.session_state.predictions:
-        df = pd.DataFrame(st.session_state.predictions)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        
+    if not df.empty:
         # Time-series plot
         st.subheader("Time-Series Analysis")
         fig_time = px.line(
@@ -336,10 +341,7 @@ with tab2:
 with tab3:
     st.header("Model Performance")
     
-    if st.session_state.predictions:
-        df = pd.DataFrame(st.session_state.predictions)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        
+    if not df.empty:
         # Performance metrics
         st.subheader("Performance Metrics")
         valid_df = df.dropna(subset=["label", "anomaly"])
@@ -384,3 +386,5 @@ with tab3:
         )
         fig_hist.add_vline(x=threshold, line_dash="dash", line_color="black", annotation_text="Threshold")
         st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("No predictions available for performance analysis.")
